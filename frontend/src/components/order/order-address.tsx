@@ -35,6 +35,7 @@ export function OrderAddress() {
             address: orderPersistData.address,
             payment: PaymentType.Online,
         })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [orderPersistData])
 
     const nextStep = () => {

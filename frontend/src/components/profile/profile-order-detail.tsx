@@ -9,6 +9,7 @@ import { useDispatch, useSelector } from '../../services/hooks'
 import { selectOrderByNumber } from '../../services/selector'
 import { getCurrentUserOrderByNumber } from '../../services/slice/profile-orders/thunk'
 import { adapterOrderFromServer } from '../../utils/adapterOrderFromServer'
+import { sanitizeUserHtml } from '../../utils/sanitize-html'
 import { Preloader } from '../preloader'
 import styles from './profile.module.scss'
 
@@ -21,7 +22,6 @@ export default function ProfileOrderDetail() {
     const number = useParams().number || ''
     const dispatch = useDispatch()
     const orderData = useSelector(selectOrderByNumber(+number))
-    console.log(orderData)
 
     useEffect(() => {
         if (!orderData) {
@@ -68,19 +68,16 @@ export default function ProfileOrderDetail() {
                 key: 'comment',
                 label: 'Ваш комментарий к заказу',
                 extraClass: styles.profile__gridRowFullWidth,
-                render: (dataInfo: OrderData) => (
-                    <>
-                        {dataInfo.comment ? (
-                            <div
-                                dangerouslySetInnerHTML={{
-                                    __html: dataInfo.comment,
-                                }}
-                            />
-                        ) : (
-                            'Комментариев нет'
-                        )}
-                    </>
-                ),
+                render: (dataInfo: OrderData) =>
+                    dataInfo.comment ? (
+                        <div
+                            dangerouslySetInnerHTML={{
+                                __html: sanitizeUserHtml(dataInfo.comment),
+                            }}
+                        />
+                    ) : (
+                        <span>Комментариев нет</span>
+                    ),
             },
         ],
         [orderData]

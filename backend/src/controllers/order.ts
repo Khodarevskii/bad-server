@@ -1,10 +1,22 @@
 import { NextFunction, Request, Response } from 'express'
 import { FilterQuery, Error as MongooseError, Types } from 'mongoose'
+import sanitizeHtml from 'sanitize-html'
 import BadRequestError from '../errors/bad-request-error'
 import NotFoundError from '../errors/not-found-error'
 import Order, { IOrder } from '../models/order'
 import Product, { IProduct } from '../models/product'
 import User from '../models/user'
+import escapeRegExp from '../utils/escapeRegExp'
+
+const sanitizeUserHtml = (input: unknown): string => {
+    if (typeof input !== 'string') return ''
+    return sanitizeHtml(input, {
+        allowedTags: ['b', 'i', 'em', 'strong', 'p', 'br', 'ul', 'ol', 'li'],
+        allowedAttributes: {},
+        allowedSchemes: [],
+        disallowedTagsMode: 'discard',
+    })
+}
 
 // eslint-disable-next-line max-len
 // GET /orders?page=2&limit=5&sort=totalAmount&order=desc&orderDateFrom=2024-07-01&orderDateTo=2024-08-01&status=delivering&totalAmountFrom=100&totalAmountTo=1000&search=%2B1
@@ -28,15 +40,31 @@ export const getOrders = async (
             search,
         } = req.query
 
+        const safePage = Math.max(1, Math.min(Number(page) || 1, 10000))
+        const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 10))
+
+        // Защита от NoSQL-инъекций в query: статус, sortField, sortOrder
+        // должны быть строками (а не объектами/массивами).
+        const stringOrUndefined = (v: unknown): boolean =>
+            v === undefined || typeof v === 'string'
+        if (
+            !stringOrUndefined(status) ||
+            !stringOrUndefined(sortField) ||
+            !stringOrUndefined(sortOrder) ||
+            !stringOrUndefined(search) ||
+            !stringOrUndefined(totalAmountFrom) ||
+            !stringOrUndefined(totalAmountTo) ||
+            !stringOrUndefined(orderDateFrom) ||
+            !stringOrUndefined(orderDateTo)
+        ) {
+            return next(new BadRequestError('Не валидные параметры запроса'))
+        }
+
         const filters: FilterQuery<Partial<IOrder>> = {}
 
-        if (status) {
-            if (typeof status === 'object') {
-                Object.assign(filters, status)
-            }
-            if (typeof status === 'string') {
-                filters.status = status
-            }
+        const allowedStatuses = ['cancelled', 'completed', 'new', 'delivering']
+        if (typeof status === 'string' && allowedStatuses.includes(status)) {
+            filters.status = status
         }
 
         if (totalAmountFrom) {
@@ -89,8 +117,9 @@ export const getOrders = async (
             { $unwind: '$products' },
         ]
 
-        if (search) {
-            const searchRegex = new RegExp(search as string, 'i')
+        if (typeof search === 'string' && search.length > 0) {
+            const safeSearch = escapeRegExp(search.slice(0, 100))
+            const searchRegex = new RegExp(safeSearch, 'i')
             const searchNumber = Number(search)
 
             const searchConditions: any[] = [{ 'products.title': searchRegex }]
@@ -108,16 +137,25 @@ export const getOrders = async (
             filters.$or = searchConditions
         }
 
-        const sort: { [key: string]: any } = {}
-
-        if (sortField && sortOrder) {
-            sort[sortField as string] = sortOrder === 'desc' ? -1 : 1
+        const allowedSortFields = new Set([
+            'createdAt',
+            'totalAmount',
+            'orderNumber',
+            'status',
+        ])
+        const safeSortField =
+            typeof sortField === 'string' && allowedSortFields.has(sortField)
+                ? sortField
+                : 'createdAt'
+        const safeSortOrder = sortOrder === 'asc' ? 1 : -1
+        const sort: { [key: string]: 1 | -1 } = {
+            [safeSortField]: safeSortOrder,
         }
 
         aggregatePipeline.push(
             { $sort: sort },
-            { $skip: (Number(page) - 1) * Number(limit) },
-            { $limit: Number(limit) },
+            { $skip: (safePage - 1) * safeLimit },
+            { $limit: safeLimit },
             {
                 $group: {
                     _id: '$_id',
@@ -133,15 +171,15 @@ export const getOrders = async (
 
         const orders = await Order.aggregate(aggregatePipeline)
         const totalOrders = await Order.countDocuments(filters)
-        const totalPages = Math.ceil(totalOrders / Number(limit))
+        const totalPages = Math.ceil(totalOrders / safeLimit)
 
         res.status(200).json({
             orders,
             pagination: {
                 totalOrders,
                 totalPages,
-                currentPage: Number(page),
-                pageSize: Number(limit),
+                currentPage: safePage,
+                pageSize: safeLimit,
             },
         })
     } catch (error) {
@@ -157,9 +195,11 @@ export const getOrdersCurrentUser = async (
     try {
         const userId = res.locals.user._id
         const { search, page = 1, limit = 5 } = req.query
+        const safePage = Math.max(1, Math.min(Number(page) || 1, 10000))
+        const safeLimit = Math.max(1, Math.min(Number(limit) || 5, 100))
         const options = {
-            skip: (Number(page) - 1) * Number(limit),
-            limit: Number(limit),
+            skip: (safePage - 1) * safeLimit,
+            limit: safeLimit,
         }
 
         const user = await User.findById(userId)
@@ -183,9 +223,9 @@ export const getOrdersCurrentUser = async (
 
         let orders = user.orders as unknown as IOrder[]
 
-        if (search) {
-            // если не экранировать то получаем Invalid regular expression: /+1/i: Nothing to repeat
-            const searchRegex = new RegExp(search as string, 'i')
+        if (typeof search === 'string' && search.length > 0) {
+            const safeSearch = escapeRegExp(search.slice(0, 100))
+            const searchRegex = new RegExp(safeSearch, 'i')
             const searchNumber = Number(search)
             const products = await Product.find({ title: searchRegex })
             const productIds = products.map((product) => product._id)
@@ -205,7 +245,7 @@ export const getOrdersCurrentUser = async (
         }
 
         const totalOrders = orders.length
-        const totalPages = Math.ceil(totalOrders / Number(limit))
+        const totalPages = Math.ceil(totalOrders / safeLimit)
 
         orders = orders.slice(options.skip, options.skip + options.limit)
 
@@ -214,8 +254,8 @@ export const getOrdersCurrentUser = async (
             pagination: {
                 totalOrders,
                 totalPages,
-                currentPage: Number(page),
-                pageSize: Number(limit),
+                currentPage: safePage,
+                pageSize: safeLimit,
             },
         })
     } catch (error) {
@@ -230,9 +270,11 @@ export const getOrderByNumber = async (
     next: NextFunction
 ) => {
     try {
-        const order = await Order.findOne({
-            orderNumber: req.params.orderNumber,
-        })
+        const orderNumber = Number(req.params.orderNumber)
+        if (!Number.isFinite(orderNumber) || !Number.isInteger(orderNumber)) {
+            return next(new BadRequestError('Передан не валидный номер заказа'))
+        }
+        const order = await Order.findOne({ orderNumber })
             .populate(['customer', 'products'])
             .orFail(
                 () =>
@@ -256,9 +298,11 @@ export const getOrderCurrentUserByNumber = async (
 ) => {
     const userId = res.locals.user._id
     try {
-        const order = await Order.findOne({
-            orderNumber: req.params.orderNumber,
-        })
+        const orderNumber = Number(req.params.orderNumber)
+        if (!Number.isFinite(orderNumber) || !Number.isInteger(orderNumber)) {
+            return next(new BadRequestError('Передан не валидный номер заказа'))
+        }
+        const order = await Order.findOne({ orderNumber })
             .populate(['customer', 'products'])
             .orFail(
                 () =>
@@ -315,7 +359,7 @@ export const createOrder = async (
             payment,
             phone,
             email,
-            comment,
+            comment: sanitizeUserHtml(comment),
             customer: userId,
             deliveryAddress: address,
         })
@@ -339,8 +383,16 @@ export const updateOrder = async (
 ) => {
     try {
         const { status } = req.body
+        const orderNumber = Number(req.params.orderNumber)
+        if (!Number.isFinite(orderNumber) || !Number.isInteger(orderNumber)) {
+            return next(new BadRequestError('Передан не валидный номер заказа'))
+        }
+        const allowedStatuses = ['cancelled', 'completed', 'new', 'delivering']
+        if (typeof status !== 'string' || !allowedStatuses.includes(status)) {
+            return next(new BadRequestError('Не валидный статус заказа'))
+        }
         const updatedOrder = await Order.findOneAndUpdate(
-            { orderNumber: req.params.orderNumber },
+            { orderNumber },
             { status },
             { new: true, runValidators: true }
         )

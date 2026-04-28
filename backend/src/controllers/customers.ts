@@ -1,8 +1,10 @@
 import { NextFunction, Request, Response } from 'express'
-import { FilterQuery } from 'mongoose'
+import { FilterQuery, Types } from 'mongoose'
+import BadRequestError from '../errors/bad-request-error'
 import NotFoundError from '../errors/not-found-error'
 import Order from '../models/order'
 import User, { IUser } from '../models/user'
+import escapeRegExp from '../utils/escapeRegExp'
 
 // TODO: Добавить guard admin
 // eslint-disable-next-line max-len
@@ -28,6 +30,26 @@ export const getCustomers = async (
             orderCountTo,
             search,
         } = req.query
+
+        // Защита от NoSQL-инъекций в query: все параметры должны быть
+        // строками или отсутствовать.
+        const stringOrUndefined = (v: unknown): boolean =>
+            v === undefined || typeof v === 'string'
+        if (
+            !stringOrUndefined(sortField) ||
+            !stringOrUndefined(sortOrder) ||
+            !stringOrUndefined(registrationDateFrom) ||
+            !stringOrUndefined(registrationDateTo) ||
+            !stringOrUndefined(lastOrderDateFrom) ||
+            !stringOrUndefined(lastOrderDateTo) ||
+            !stringOrUndefined(totalAmountFrom) ||
+            !stringOrUndefined(totalAmountTo) ||
+            !stringOrUndefined(orderCountFrom) ||
+            !stringOrUndefined(orderCountTo) ||
+            !stringOrUndefined(search)
+        ) {
+            return next(new BadRequestError('Не валидные параметры запроса'))
+        }
 
         const filters: FilterQuery<Partial<IUser>> = {}
 
@@ -91,8 +113,9 @@ export const getCustomers = async (
             }
         }
 
-        if (search) {
-            const searchRegex = new RegExp(search as string, 'i')
+        if (typeof search === 'string' && search.length > 0) {
+            const safeSearch = escapeRegExp(search.slice(0, 100))
+            const searchRegex = new RegExp(safeSearch, 'i')
             const orders = await Order.find(
                 {
                     $or: [{ deliveryAddress: searchRegex }],
@@ -108,16 +131,25 @@ export const getCustomers = async (
             ]
         }
 
-        const sort: { [key: string]: any } = {}
-
-        if (sortField && sortOrder) {
-            sort[sortField as string] = sortOrder === 'desc' ? -1 : 1
-        }
+        const allowedSortFields = new Set([
+            'createdAt',
+            'name',
+            'totalAmount',
+            'orderCount',
+            'lastOrderDate',
+        ])
+        const safeSortField =
+            typeof sortField === 'string' && allowedSortFields.has(sortField)
+                ? sortField
+                : 'createdAt'
+        const safeSortOrder = sortOrder === 'asc' ? 1 : -1
+        const safePage = Math.max(1, Math.min(Number(page) || 1, 10000))
+        const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 10))
 
         const options = {
-            sort,
-            skip: (Number(page) - 1) * Number(limit),
-            limit: Number(limit),
+            sort: { [safeSortField]: safeSortOrder } as { [key: string]: 1 | -1 },
+            skip: (safePage - 1) * safeLimit,
+            limit: safeLimit,
         }
 
         const users = await User.find(filters, null, options).populate([
@@ -137,15 +169,15 @@ export const getCustomers = async (
         ])
 
         const totalUsers = await User.countDocuments(filters)
-        const totalPages = Math.ceil(totalUsers / Number(limit))
+        const totalPages = Math.ceil(totalUsers / safeLimit)
 
         res.status(200).json({
             customers: users,
             pagination: {
                 totalUsers,
                 totalPages,
-                currentPage: Number(page),
-                pageSize: Number(limit),
+                currentPage: safePage,
+                pageSize: safeLimit,
             },
         })
     } catch (error) {
@@ -153,7 +185,13 @@ export const getCustomers = async (
     }
 }
 
-// TODO: Добавить guard admin
+const validateCustomerId = (rawId: unknown): Types.ObjectId | null => {
+    if (typeof rawId !== 'string' || !Types.ObjectId.isValid(rawId)) {
+        return null
+    }
+    return new Types.ObjectId(rawId)
+}
+
 // Get /customers/:id
 export const getCustomerById = async (
     req: Request,
@@ -161,17 +199,17 @@ export const getCustomerById = async (
     next: NextFunction
 ) => {
     try {
-        const user = await User.findById(req.params.id).populate([
-            'orders',
-            'lastOrder',
-        ])
-        res.status(200).json(user)
+        const id = validateCustomerId(req.params.id)
+        if (!id) {
+            return next(new BadRequestError('Передан не валидный id'))
+        }
+        const user = await User.findById(id).populate(['orders', 'lastOrder'])
+        return res.status(200).json(user)
     } catch (error) {
-        next(error)
+        return next(error)
     }
 }
 
-// TODO: Добавить guard admin
 // Patch /customers/:id
 export const updateCustomer = async (
     req: Request,
@@ -179,13 +217,25 @@ export const updateCustomer = async (
     next: NextFunction
 ) => {
     try {
-        const updatedUser = await User.findByIdAndUpdate(
-            req.params.id,
-            req.body,
-            {
-                new: true,
+        const id = validateCustomerId(req.params.id)
+        if (!id) {
+            return next(new BadRequestError('Передан не валидный id'))
+        }
+        // Whitelist обновляемых полей, чтобы избежать mass assignment
+        // (например, изменение roles, password, tokens через тело запроса)
+        const allowedFields = ['name', 'email', 'phone'] as const
+        const update: Partial<Pick<IUser, (typeof allowedFields)[number]>> = {}
+        allowedFields.forEach((field) => {
+            const value = (req.body as Record<string, unknown>)[field]
+            if (typeof value === 'string') {
+                update[field] = value
             }
-        )
+        })
+
+        const updatedUser = await User.findByIdAndUpdate(id, update, {
+            new: true,
+            runValidators: true,
+        })
             .orFail(
                 () =>
                     new NotFoundError(
@@ -193,13 +243,12 @@ export const updateCustomer = async (
                     )
             )
             .populate(['orders', 'lastOrder'])
-        res.status(200).json(updatedUser)
+        return res.status(200).json(updatedUser)
     } catch (error) {
-        next(error)
+        return next(error)
     }
 }
 
-// TODO: Добавить guard admin
 // Delete /customers/:id
 export const deleteCustomer = async (
     req: Request,
@@ -207,14 +256,18 @@ export const deleteCustomer = async (
     next: NextFunction
 ) => {
     try {
-        const deletedUser = await User.findByIdAndDelete(req.params.id).orFail(
+        const id = validateCustomerId(req.params.id)
+        if (!id) {
+            return next(new BadRequestError('Передан не валидный id'))
+        }
+        const deletedUser = await User.findByIdAndDelete(id).orFail(
             () =>
                 new NotFoundError(
                     'Пользователь по заданному id отсутствует в базе'
                 )
         )
-        res.status(200).json(deletedUser)
+        return res.status(200).json(deletedUser)
     } catch (error) {
-        next(error)
+        return next(error)
     }
 }

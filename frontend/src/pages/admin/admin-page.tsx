@@ -15,6 +15,7 @@ export default function AdminPage() {
         checkUserRoles().finally(() => {
             setLoading(false)
         })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     useEffect(() => {

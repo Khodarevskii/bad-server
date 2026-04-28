@@ -9,8 +9,8 @@ export default defineConfig({
   plugins: [ svgr(), react(), tsconfigPaths({root: __dirname})],
   resolve: {
     alias: {
-      $fonts: resolve('./src/vendor/fonts'),
-      $assets: resolve('./src/assets'),
+      $fonts: resolve(__dirname, './src/vendor/fonts'),
+      $assets: resolve(__dirname, './src/assets'),
     }
   },
   build: {
@@ -20,8 +20,8 @@ export default defineConfig({
     preprocessorOptions: {
       scss: {
         additionalData: `
-          @use "./src/scss/variables" as *;
-          @use "./src/scss/mixins";
+          @use "${resolve(__dirname, './src/scss/variables').replace(/\\/g, '/')}" as *;
+          @use "${resolve(__dirname, './src/scss/mixins').replace(/\\/g, '/')}";
         `,
       },
 

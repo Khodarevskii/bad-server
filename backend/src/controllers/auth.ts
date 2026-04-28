@@ -14,6 +14,11 @@ import User from '../models/user'
 const login = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { email, password } = req.body
+        // Защита от NoSQL-инъекций: запрашиваемые поля должны быть строками,
+        // иначе злоумышленник мог бы передать объект вида { $gt: '' }.
+        if (typeof email !== 'string' || typeof password !== 'string') {
+            return next(new BadRequestError('Неправильные почта или пароль'))
+        }
         const user = await User.findUserByCredentials(email, password)
         const accessToken = user.generateAccessToken()
         const refreshToken = await user.generateRefreshToken()
@@ -36,7 +41,17 @@ const login = async (req: Request, res: Response, next: NextFunction) => {
 const register = async (req: Request, res: Response, next: NextFunction) => {
     try {
         const { email, password, name } = req.body
-        const newUser = new User({ email, password, name })
+        // Принудительно приводим поля к строке, чтобы исключить NoSQL-инъекцию.
+        // Роли всегда проставляются по умолчанию (customer) и не могут быть
+        // заданы клиентом, чтобы исключить эскалацию привилегий.
+        if (typeof email !== 'string' || typeof password !== 'string') {
+            return next(new BadRequestError('Не валидные данные регистрации'))
+        }
+        const newUser = new User({
+            email,
+            password,
+            name: typeof name === 'string' ? name : undefined,
+        })
         await newUser.save()
         const accessToken = newUser.generateAccessToken()
         const refreshToken = await newUser.generateRefreshToken()
@@ -165,21 +180,19 @@ const refreshAccessToken = async (
 }
 
 const getCurrentUserRoles = async (
-    req: Request,
+    _req: Request,
     res: Response,
     next: NextFunction
 ) => {
     const userId = res.locals.user._id
     try {
-        await User.findById(userId, req.body, {
-            new: true,
-        }).orFail(
+        const user = await User.findById(userId).orFail(
             () =>
                 new NotFoundError(
                     'Пользователь по заданному id отсутствует в базе'
                 )
         )
-        res.status(200).json(res.locals.user.roles)
+        res.status(200).json(user.roles)
     } catch (error) {
         next(error)
     }
@@ -192,8 +205,20 @@ const updateCurrentUser = async (
 ) => {
     const userId = res.locals.user._id
     try {
-        const updatedUser = await User.findByIdAndUpdate(userId, req.body, {
+        // Whitelist полей, чтобы пользователь не мог изменить роли,
+        // пароль или токены через тело запроса.
+        const allowedFields = ['name', 'email', 'phone'] as const
+        const update: Record<string, string> = {}
+        allowedFields.forEach((field) => {
+            const value = (req.body as Record<string, unknown>)[field]
+            if (typeof value === 'string') {
+                update[field] = value
+            }
+        })
+
+        const updatedUser = await User.findByIdAndUpdate(userId, update, {
             new: true,
+            runValidators: true,
         }).orFail(
             () =>
                 new NotFoundError(
