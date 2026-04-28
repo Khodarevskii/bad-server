@@ -12,6 +12,7 @@ import { selectOrderByNumber } from '../../services/selector'
 import { ordersActions } from '../../services/slice/orders'
 import { getOrderByNumber } from '../../services/slice/orders/thunk'
 import { adapterOrderFromServer } from '../../utils/adapterOrderFromServer'
+import { sanitizeUserHtml } from '../../utils/sanitize-html'
 import { Preloader } from '../preloader'
 import styles from './admin.module.scss'
 
@@ -100,13 +101,11 @@ export default function AdminOrderDetail() {
                 label: 'Комментарий к заказу',
                 extraClass: styles.profile__gridRowFullWidth,
                 render: (dataInfo: OrderData) => (
-                    <>
-                        <div
-                            dangerouslySetInnerHTML={{
-                                __html: dataInfo.comment,
-                            }}
-                        />
-                    </>
+                    <div
+                        dangerouslySetInnerHTML={{
+                            __html: sanitizeUserHtml(dataInfo.comment),
+                        }}
+                    />
                 ),
             },
             {
@@ -124,6 +123,7 @@ export default function AdminOrderDetail() {
                 extraClass: styles.admin__gridRowFullWidth,
             },
         ],
+        // eslint-disable-next-line react-hooks/exhaustive-deps
         [orderData]
     )
 

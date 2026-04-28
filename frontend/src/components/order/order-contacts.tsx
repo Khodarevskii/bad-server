@@ -38,6 +38,7 @@ export function OrderContacts() {
             email: orderPersistData.email,
             phone: orderPersistData.phone,
         })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [orderPersistData])
 
     const handleEditInputChange = (value: string) => {

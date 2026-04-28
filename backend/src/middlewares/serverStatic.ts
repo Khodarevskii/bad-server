@@ -3,21 +3,41 @@ import fs from 'fs'
 import path from 'path'
 
 export default function serveStatic(baseDir: string) {
+    const safeBase = path.resolve(baseDir)
     return (req: Request, res: Response, next: NextFunction) => {
-        // Определяем полный путь к запрашиваемому файлу
-        const filePath = path.join(baseDir, req.path)
+        let decodedPath: string
+        try {
+            decodedPath = decodeURIComponent(req.path)
+        } catch (err) {
+            return next()
+        }
 
-        // Проверяем, существует ли файл
-        fs.access(filePath, fs.constants.F_OK, (err) => {
+        if (decodedPath.indexOf('\0') !== -1) {
+            return next()
+        }
+
+        const filePath = path.resolve(path.join(safeBase, decodedPath))
+
+        if (
+            filePath !== safeBase &&
+            !filePath.startsWith(safeBase + path.sep)
+        ) {
+            return next()
+        }
+
+        return fs.access(filePath, fs.constants.F_OK, (err) => {
             if (err) {
-                // Файл не существует отдаем дальше мидлварам
                 return next()
             }
-            // Файл существует, отправляем его клиенту
-            return res.sendFile(filePath, (err) => {
-                if (err) {
-                    next(err)
+            return fs.stat(filePath, (statErr, stats) => {
+                if (statErr || !stats.isFile()) {
+                    return next()
                 }
+                return res.sendFile(filePath, (sendErr) => {
+                    if (sendErr) {
+                        next(sendErr)
+                    }
+                })
             })
         })
     }

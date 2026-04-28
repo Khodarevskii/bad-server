@@ -71,6 +71,7 @@ export default function AdminEditProduct() {
                 title: currentProduct.title,
             })
         }
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [currentProduct])
 
     const handleUpdateProduct = async () => {

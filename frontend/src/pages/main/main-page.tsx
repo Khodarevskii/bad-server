@@ -13,6 +13,7 @@ export default function MainPage() {
     const { getProducts } = useActionCreators(productsActions)
     useEffect(() => {
         getProducts({ limit: 20 })
+        // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
 
     const products = useSelector(productsSelector.selectProducts)

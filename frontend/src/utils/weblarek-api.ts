@@ -55,9 +55,33 @@ class Api {
 
     protected async request<T>(endpoint: string, options: RequestInit) {
         try {
+            const method = (options.method || 'GET').toUpperCase()
+            const isStateChanging = !['GET', 'HEAD', 'OPTIONS'].includes(method)
+            const csrfHeaders: Record<string, string> = {}
+            if (isStateChanging) {
+                const csrfToken = getCookie('csrfToken')
+                if (!csrfToken) {
+                    // Получаем CSRF токен с сервера, если его еще нет.
+                    await fetch(`${this.baseUrl}/auth/csrf`, {
+                        method: 'GET',
+                        credentials: 'include',
+                    })
+                }
+                const token = getCookie('csrfToken')
+                if (token) {
+                    csrfHeaders['X-CSRF-Token'] = token
+                }
+            }
+            const mergedHeaders = {
+                ...((this.options.headers as Record<string, string>) ?? {}),
+                ...((options.headers as Record<string, string>) ?? {}),
+                ...csrfHeaders,
+            }
             const res = await fetch(`${this.baseUrl}${endpoint}`, {
+                credentials: 'include',
                 ...this.options,
                 ...options,
+                headers: mergedHeaders,
             })
             return await this.handleResponse<T>(res)
         } catch (error) {
