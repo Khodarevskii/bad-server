@@ -41,7 +41,24 @@ export const getOrders = async (
         } = req.query
 
         const safePage = Math.max(1, Math.min(Number(page) || 1, 10000))
-        const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 100))
+        const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 10))
+
+        // Защита от NoSQL-инъекций в query: статус, sortField, sortOrder
+        // должны быть строками (а не объектами/массивами).
+        const stringOrUndefined = (v: unknown): boolean =>
+            v === undefined || typeof v === 'string'
+        if (
+            !stringOrUndefined(status) ||
+            !stringOrUndefined(sortField) ||
+            !stringOrUndefined(sortOrder) ||
+            !stringOrUndefined(search) ||
+            !stringOrUndefined(totalAmountFrom) ||
+            !stringOrUndefined(totalAmountTo) ||
+            !stringOrUndefined(orderDateFrom) ||
+            !stringOrUndefined(orderDateTo)
+        ) {
+            return next(new BadRequestError('Не валидные параметры запроса'))
+        }
 
         const filters: FilterQuery<Partial<IOrder>> = {}
 

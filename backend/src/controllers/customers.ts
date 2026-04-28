@@ -31,6 +31,26 @@ export const getCustomers = async (
             search,
         } = req.query
 
+        // Защита от NoSQL-инъекций в query: все параметры должны быть
+        // строками или отсутствовать.
+        const stringOrUndefined = (v: unknown): boolean =>
+            v === undefined || typeof v === 'string'
+        if (
+            !stringOrUndefined(sortField) ||
+            !stringOrUndefined(sortOrder) ||
+            !stringOrUndefined(registrationDateFrom) ||
+            !stringOrUndefined(registrationDateTo) ||
+            !stringOrUndefined(lastOrderDateFrom) ||
+            !stringOrUndefined(lastOrderDateTo) ||
+            !stringOrUndefined(totalAmountFrom) ||
+            !stringOrUndefined(totalAmountTo) ||
+            !stringOrUndefined(orderCountFrom) ||
+            !stringOrUndefined(orderCountTo) ||
+            !stringOrUndefined(search)
+        ) {
+            return next(new BadRequestError('Не валидные параметры запроса'))
+        }
+
         const filters: FilterQuery<Partial<IUser>> = {}
 
         if (registrationDateFrom) {
@@ -124,7 +144,7 @@ export const getCustomers = async (
                 : 'createdAt'
         const safeSortOrder = sortOrder === 'asc' ? 1 : -1
         const safePage = Math.max(1, Math.min(Number(page) || 1, 10000))
-        const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 100))
+        const safeLimit = Math.max(1, Math.min(Number(limit) || 10, 10))
 
         const options = {
             sort: { [safeSortField]: safeSortOrder } as { [key: string]: 1 | -1 },

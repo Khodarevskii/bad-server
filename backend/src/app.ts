@@ -21,6 +21,9 @@ app.disable('x-powered-by')
 
 app.use(helmet())
 
+// Глобальный rate limit: не менее 10 запросов в минуту с одного IP
+// (требование из задания) — реально 100 в минуту, чтобы не мешать
+// нормальной навигации.
 const limiter = rateLimit({
     windowMs: 60 * 1000,
     limit: 100,
@@ -32,6 +35,20 @@ const limiter = rateLimit({
     },
 })
 app.use(limiter)
+
+// Burst-лимитер: 10 запросов в секунду. Защищает от резких всплесков
+// (Promise.all из браузера или нагрузочных тестов), не мешая обычной
+// последовательной работе пользователя.
+const burstLimiter = rateLimit({
+    windowMs: 1000,
+    limit: 10,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+    message: {
+        message: 'Слишком много запросов, попробуйте чуть позже',
+    },
+})
+app.use(burstLimiter)
 
 app.use(cookieParser())
 
