@@ -30,6 +30,7 @@ const authLimiter = rateLimit({
         message: 'Слишком много попыток, попробуйте позже',
     },
 })
+
 authRouter.get('/csrf-token', csrfTokenHandler)
 authRouter.get('/csrf', csrfTokenHandler)
 authRouter.get('/user', auth, getCurrentUser)

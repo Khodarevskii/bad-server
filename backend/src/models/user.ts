@@ -8,6 +8,36 @@ import validator from 'validator'
 import { ACCESS_TOKEN, REFRESH_TOKEN } from '../config'
 import UnauthorizedError from '../errors/unauthorized-error'
 
+// Совместимость с предыдущей версией: пользователи из дампа имеют md5-хеш
+// (32 шестнадцатеричных символа). Новые пароли хешируются через bcrypt
+// (формат $2a$/$2b$). Если хеш — bcrypt, проверяем bcrypt.compare,
+// иначе — fallback на md5 в безопасном сравнении.
+const md5Hex = (input: string): string =>
+    crypto.createHash('md5').update(input).digest('hex')
+
+const isBcryptHash = (hash: string): boolean =>
+    typeof hash === 'string' && /^\$2[aby]?\$/.test(hash)
+
+const safeEquals = (a: string, b: string): boolean => {
+    if (typeof a !== 'string' || typeof b !== 'string') return false
+    if (a.length !== b.length) return false
+    try {
+        return crypto.timingSafeEqual(Buffer.from(a), Buffer.from(b))
+    } catch {
+        return false
+    }
+}
+
+const verifyPassword = async (
+    plain: string,
+    hash: string
+): Promise<boolean> => {
+    if (isBcryptHash(hash)) {
+        return bcrypt.compare(plain, hash)
+    }
+    return safeEquals(md5Hex(plain), hash)
+}
+
 export enum Role {
     Customer = 'customer',
     Admin = 'admin',
@@ -184,11 +214,17 @@ userSchema.statics.findUserByCredentials = async function findByCredentials(
     const user = await this.findOne({ email })
         .select('+password')
         .orFail(() => new UnauthorizedError('Неправильные почта или пароль'))
-    const passwdMatch = await bcrypt.compare(password, user.password)
+    const passwdMatch = await verifyPassword(password, user.password)
     if (!passwdMatch) {
         return Promise.reject(
             new UnauthorizedError('Неправильные почта или пароль')
         )
+    }
+    // Прозрачная миграция md5 → bcrypt: если пароль валиден, но хранится
+    // в md5, то на лету пересохраняем его в bcrypt.
+    if (!isBcryptHash(user.password)) {
+        user.password = password
+        await user.save()
     }
     return user
 }

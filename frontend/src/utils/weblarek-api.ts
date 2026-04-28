@@ -59,15 +59,15 @@ class Api {
             const isStateChanging = !['GET', 'HEAD', 'OPTIONS'].includes(method)
             const csrfHeaders: Record<string, string> = {}
             if (isStateChanging) {
-                const csrfToken = getCookie('csrfToken')
+                const csrfToken = getCookie('_csrf')
                 if (!csrfToken) {
                     // Получаем CSRF токен с сервера, если его еще нет.
-                    await fetch(`${this.baseUrl}/auth/csrf-token`,  {
+                    await fetch(`${this.baseUrl}/auth/csrf-token`, {
                         method: 'GET',
                         credentials: 'include',
                     })
                 }
-                const token = getCookie('csrfToken')
+                const token = getCookie('_csrf')
                 if (token) {
                     csrfHeaders['X-CSRF-Token'] = token
                 }

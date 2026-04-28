@@ -2,7 +2,7 @@ import crypto from 'crypto'
 import { CookieOptions, NextFunction, Request, Response } from 'express'
 import ForbiddenError from '../errors/forbidden-error'
 
-const CSRF_COOKIE_NAME = 'csrfToken'
+const CSRF_COOKIE_NAME = '_csrf'
 const CSRF_HEADER_NAME = 'x-csrf-token'
 const CSRF_TOKEN_LENGTH = 32
 
@@ -66,7 +66,7 @@ const exemptPaths = new Set<string>([
     '/auth/token',
     '/auth/logout',
     '/auth/csrf',
-    '/auth/csrf-token'
+    '/auth/csrf-token',
 ])
 
 // Проверяет CSRF токен по double-submit паттерну: значение в cookie должно
