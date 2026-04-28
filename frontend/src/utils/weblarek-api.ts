@@ -62,7 +62,7 @@ class Api {
                 const csrfToken = getCookie('csrfToken')
                 if (!csrfToken) {
                     // Получаем CSRF токен с сервера, если его еще нет.
-                    await fetch(`${this.baseUrl}/auth/csrf`, {
+                    await fetch(`${this.baseUrl}/auth/csrf-token`,  {
                         method: 'GET',
                         credentials: 'include',
                     })

@@ -66,6 +66,7 @@ const exemptPaths = new Set<string>([
     '/auth/token',
     '/auth/logout',
     '/auth/csrf',
+    '/auth/csrf-token'
 ])
 
 // Проверяет CSRF токен по double-submit паттерну: значение в cookie должно
